@@ -1,6 +1,6 @@
 -- ============================================================
---  Vector Hub  |  Farming logic untouched from Code 1
---  Extras tab  |  New features from Code 2 (Fluent UI)
+--  AOTR FREE HUB  |  Farming logic untouched from Code 1
+--  Extras tab     |  New features from Code 2 (Fluent UI)
 -- ============================================================
 
 _G.save={FlyEnabled=false,VFlyEnabled=false,QEFlyEnabled=true,FlySpeed=1,VFlySpeed=1,Noclip=false,infjump=false,BoostFPS=false,BlackScreen=false,WhiteScreen=false,FPSLOCK=false,FPS=60,AutoHide=false,Theme="Dark",Accent="Blue"}
@@ -48,8 +48,8 @@ local isMobile = game:GetService("UserInputService").TouchEnabled
 local Game = game:GetService("MarketplaceService"):GetProductInfo(game.PlaceId).Name
 
 local Window = Fluent:CreateWindow({
-    Title    = "Vector Hub : "..Game,
-    SubTitle = "Made by Ryuenz",
+    Title    = "AOTR FREE HUB : "..Game,
+    SubTitle = "",
     TabWidth = 160,
     Size     = isMobile and UDim2.fromOffset(400,380) or UDim2.fromOffset(620,500),
     Acrylic  = false,
@@ -65,7 +65,7 @@ local Tabs = {
     Servers     = Window:AddTab({ Title = "Servers",    Icon = "globe"         }),
     Appearance  = Window:AddTab({ Title = "Appearance", Icon = "palette"       }),
     Extras      = Window:AddTab({ Title = "Extras",     Icon = "plus-circle"   }),
-    Webhook     = Window:AddTab({ Title = "Webhook",    Icon = "webhook"       }),
+    Webhook     = Window:AddTab({ Title = "Webhook",    Icon = "radio"         }),
     Settings    = Window:AddTab({ Title = "Settings",   Icon = "settings"      }),
 }
 
@@ -197,8 +197,6 @@ local function UpdateInfo()
 end
 task.spawn(function() while task.wait(1) do UpdateInfo() end end)
 
-Tabs.Info:AddParagraph({ Title = "Credit", Content = "Script Made By Ryuenz#6264" })
-
 Tabs.Info:AddButton({
     Title = "Copy Discord Link",
     Description = "discord.gg/977JQXX82w",
@@ -209,7 +207,7 @@ Tabs.Info:AddButton({
             httprequest({Url="http://127.0.0.1:6463/rpc?v=1",Method="POST",Headers={["Content-Type"]="application/json",Origin="https://discord.com"},Body=HttpService:JSONEncode({cmd="INVITE_BROWSER",nonce=HttpService:GenerateGUID(false),args={code="5Yv9d26PHu"}})})
         end
         setclipboard("https://discord.gg/977JQXX82w")
-        Fluent:Notify({ Title="Vector Hub", Content="Copied Discord link!", Duration=3 })
+        Fluent:Notify({ Title="AOTR FREE HUB", Content="Copied Discord link!", Duration=3 })
     end
 })
 
@@ -1354,239 +1352,294 @@ Tabs.Extras:AddButton({
 })
 
 -- ============================================================
---  WEBHOOK TAB
+--  WEBHOOK TAB  (AoT Revolution Discord Webhook Logger)
 -- ============================================================
 
-local webhookURL       = ""
-local webhookEnabled   = false
-local webhookUsername  = true
-local lastMissionTime  = nil
+-- Configuration state
+local WebhookConfig = {
+    url              = "",
+    damageInterval   = 30,
+    showThumbnail    = true,
+    botUsername      = "AOTR FREE HUB Tracker",
+    enabled          = false,
+}
 
--- ── thumbnail shown in every embed ──────────────────────────
-local THUMB = "https://media.discordapp.net/attachments/1159475375752106086/1370816214242164836/image.png"
+local REWARD_ICONS_WH = {
+    ["Attack Serum"]="🔴",["Armored Serum"]="🟤",["Female Serum"]="🔵",["Colossal Serum"]="🔥",
+    ["Prestige Scroll"]="📜",["Emperor Key"]="🗝️",["Raider's Chest"]="📦",["Emperor's Trove"]="👑",
+    ["Colossal Shard"]="💎",["Common Perk"]="⬜",["Rare Perk"]="🟦",["Epic Perk"]="🟪",
+    ["Legendary Perk"]="🟨",["Mythical Perk"]="🔶",["Artifact"]="🏺",["Scorched Cloak"]="🧣",
+    ["Colossal Scars"]="⚡",["Backpack"]="🎒",["Rifle"]="🔫",["Double Luck Potion"]="🍀",
+    ["Double Gold Potion"]="💰",["Double XP Potion"]="⭐",["Dice"]="🎲",["Gold"]="🪙",
+    ["Gems"]="💠",["Spins"]="🌀",["Shards"]="🔷",["Canes"]="🎄",["ODM Skin"]="🗡️",
+    ["TS Skin"]="⚡",["Onikiri ODM Set"]="⚔️",["Onikiri TS Set"]="🌩️",["XP Boost"]="📈",
+    ["Unknown Reward"]="❓",
+}
 
--- ── helper: walk a dot-path through PlayerGui ───────────────
-local function getGuiText(path)
-    local node = LP:FindFirstChild("PlayerGui")
-    for _, part in ipairs(string.split(path, ".")) do
-        if node then node = node:FindFirstChild(part) end
-    end
-    return (node and node.Text) or "0"
+local RAIDS_WH = {
+    ["Attack Titan Raid"]  ={color=16711680,emoji="⚔️"},
+    ["Armored Titan Raid"] ={color=16744272,emoji="🛡️"},
+    ["Female Titan Raid"]  ={color=16711935,emoji="👊"},
+    ["Colossal Titan Raid"]={color=16740864,emoji="🔥"},
+    ["Onikiri Raid"]       ={color=5592575, emoji="⚔️🌑"},
+    ["Unknown Raid"]       ={color=7829503, emoji="❓"},
+}
+
+local DIFFICULTY_COLORS_WH = {["Hard"]=5025616,["Severe"]=16744272,["Aberrant"]=16711680}
+
+local playerDataWH = {}
+
+local function wh_timestamp() return os.date("!%Y-%m-%dT%H:%M:%SZ", os.time()) end
+
+local function wh_formatNumber(n)
+    local s=tostring(math.floor(n)) local result="" local count=0
+    for i=#s,1,-1 do count=count+1 result=s:sub(i,i)..result if count%3==0 and i~=1 then result=","..result end end
+    return result
 end
 
--- ── check if a GuiObject is actually visible ────────────────
-local function guiVisible(obj)
-    if not obj then return false end
-    local cur = obj
-    while cur and cur ~= LP.PlayerGui do
-        local ok, vis = pcall(function() return cur.Visible end)
-        if ok and not vis then return false end
-        cur = cur.Parent
-    end
-    return obj.AbsoluteSize.Magnitude > 10
+local function wh_formatDuration(seconds)
+    return string.format("%d m %02d s",math.floor(seconds/60),math.floor(seconds%60))
 end
 
--- ── get the Retry button & Rewards frame safely ─────────────
-local function getRewardsNodes()
-    local interface = LP.PlayerGui:FindFirstChild("Interface")
-    local rewards   = interface and interface:FindFirstChild("Rewards")
-    local rMain     = rewards   and rewards:FindFirstChild("Main")
-    local retry     = rMain
-        and rMain:FindFirstChild("Info")
-        and rMain.Info:FindFirstChild("Main")
-        and rMain.Info.Main:FindFirstChild("Buttons")
-        and rMain.Info.Main.Buttons:FindFirstChild("Retry")
-    return retry, rewards, rMain
+local function wh_rewardIcon(name) return REWARD_ICONS_WH[name] or REWARD_ICONS_WH["Unknown Reward"] end
+
+local function wh_buildRewardLines(rewards)
+    if not rewards or #rewards==0 then return "> *No rewards recorded.*" end
+    local lines={}
+    for _,r in ipairs(rewards) do
+        local icon=wh_rewardIcon(r.name)
+        local amtStr=(r.amount and r.amount>1) and (" x**"..r.amount.."**") or ""
+        table.insert(lines,"> "..icon.." "..r.name..amtStr)
+    end
+    return table.concat(lines,"\n")
 end
 
--- ── send the embed to Discord ────────────────────────────────
-local function sendWebhookEmbed(data)
-    -- use whichever http function the executor provides
-    local httpFn = request or http_request
-        or (syn and syn.request)
-        or (http and http.request)
-        or (fluxus and fluxus.request)
-    if not httpFn then
-        Fluent:Notify({ Title="Webhook", Content="No http function found in this executor.", Duration=5 })
-        return
-    end
-    if webhookURL == "" then return end
-
-    local ok, err = pcall(function()
-        httpFn({
-            Url     = webhookURL,
-            Method  = "POST",
-            Headers = { ["Content-Type"] = "application/json" },
-            Body    = HttpService:JSONEncode(data),
-        })
+local function wh_sendWebhook(payload)
+    if WebhookConfig.url=="" or not WebhookConfig.enabled then return end
+    pcall(function()
+        HttpService:PostAsync(WebhookConfig.url,HttpService:JSONEncode(payload),Enum.HttpContentType.ApplicationJson,false)
     end)
-    if not ok then
-        Fluent:Notify({ Title="Webhook Error", Content=tostring(err), Duration=5 })
-    end
 end
 
--- ── background loop: fires when Rewards screen appears ───────
-task.spawn(function()
-    while true do
-        task.wait(1)
-        if not webhookEnabled or webhookURL == "" then continue end
+local function wh_sendRaidStart(player,raidName,difficulty)
+    local raidInfo=RAIDS_WH[raidName] or RAIDS_WH["Unknown Raid"]
+    local embed={
+        title=raidInfo.emoji.."  Raid Started — "..raidName,
+        description=string.format("**%s** entered a raid!\n> 🏟️ **Raid:** %s\n> ⚡ **Difficulty:** %s\n> ⏰ **Started:** <t:%d:t>",player.DisplayName,raidName,difficulty,os.time()),
+        color=raidInfo.color,timestamp=wh_timestamp(),
+        footer={text="AOTR FREE HUB • Webhook"},
+    }
+    wh_sendWebhook({username=WebhookConfig.botUsername,embeds={embed}})
+end
 
-        local retryBtn, rewards, rMain = getRewardsNodes()
-        if not guiVisible(retryBtn) then continue end
+local function wh_sendDamageUpdate(player,data)
+    local raidInfo=RAIDS_WH[data.raidName] or RAIDS_WH["Unknown Raid"]
+    local elapsed=os.time()-(data.startTime or os.time())
+    local embed={
+        title="📊  Live Damage Update",
+        description=string.format("**%s** — %s %s\n\n> ⚔️ **Damage:** `%s`\n> ⏱️ **Time:** `%s`\n> ⚡ **Difficulty:** %s",
+            player.DisplayName,raidInfo.emoji,data.raidName,wh_formatNumber(data.damageDealt),wh_formatDuration(elapsed),data.difficulty or "Unknown"),
+        color=raidInfo.color,timestamp=wh_timestamp(),
+        footer={text="AOTR FREE HUB • Live Tracker"},
+    }
+    wh_sendWebhook({username=WebhookConfig.botUsername,embeds={embed}})
+end
 
-        -- Stats
-        local timeTaken = getGuiText("Interface.Rewards.Main.Info.Main.Stats.Time_Taken.Amount")
-        if timeTaken == "0" or timeTaken == lastMissionTime then continue end
-        lastMissionTime = timeTaken
+local function wh_sendRaidEnd(player,data,result)
+    local raidInfo=RAIDS_WH[data.raidName] or RAIDS_WH["Unknown Raid"]
+    local elapsed=os.time()-(data.startTime or os.time())
+    local resultEmoji=(result=="Victory") and "🏆" or "💀"
+    local resultColor=(result=="Victory") and 3066993 or 15158332
+    local serums,perks,scrolls,artifacts,potions,currencies,skins,misc={},{},{},{},{},{},{},{}
+    for _,r in ipairs(data.rewards or {}) do
+        local n=r.name
+        if n:find("Serum") then table.insert(serums,r)
+        elseif n:find("Perk") then table.insert(perks,r)
+        elseif n:find("Scroll") then table.insert(scrolls,r)
+        elseif n:find("Artifact") or n:find("Cloak") or n:find("Scars") or n:find("Backpack") or n:find("Rifle") then table.insert(artifacts,r)
+        elseif n:find("Potion") then table.insert(potions,r)
+        elseif n=="Gold" or n=="Gems" or n=="Spins" or n=="Shards" or n=="Canes" then table.insert(currencies,r)
+        elseif n:find("Skin") or n:find("Set") then table.insert(skins,r)
+        else table.insert(misc,r) end
+    end
+    local fields={{name="⚔️  Damage",value="`"..wh_formatNumber(data.damageDealt).."`",inline=true},{name="⏱️  Time",value="`"..wh_formatDuration(elapsed).."`",inline=true},{name="⚡  Difficulty",value=data.difficulty or "Unknown",inline=true}}
+    local function addField(label,list) if #list>0 then table.insert(fields,{name=label,value=wh_buildRewardLines(list),inline=false}) end end
+    addField("🔴  Serums",serums) addField("🟪  Perks",perks) addField("📜  Prestige Scrolls",scrolls)
+    addField("🏺  Artifacts",artifacts) addField("🍀  Potions",potions) addField("🗡️  Skins",skins)
+    addField("🪙  Currencies",currencies) addField("📦  Other",misc)
+    if #fields==3 then table.insert(fields,{name="📦  Rewards",value="> *No rewards dropped.*",inline=false}) end
+    local embed={
+        title=resultEmoji.."  Raid "..result.." — "..data.raidName,
+        description=string.format("**%s** finished their raid!\n> 📅 <t:%d:F>",player.DisplayName,os.time()),
+        color=resultColor,fields=fields,timestamp=wh_timestamp(),
+        footer={text="AOTR FREE HUB • Webhook"},
+    }
+    wh_sendWebhook({username=WebhookConfig.botUsername,embeds={embed}})
+end
 
-        local damage    = getGuiText("Interface.Rewards.Main.Info.Main.Stats.Damage_Dealt.Amount")
-        local kills     = getGuiText("Interface.Rewards.Main.Info.Main.Stats.Titans_Killed.Amount")
-        local crits     = getGuiText("Interface.Rewards.Main.Info.Main.Stats.Critical_Hits.Amount")
+local function wh_sendRareDropAlert(player,rewardName,rarity,raidName)
+    local rarityColors={["Legendary"]=16766720,["Mythical"]=16711935}
+    local embed={
+        title="🌟  RARE DROP ALERT!",
+        description=string.format("**%s** dropped a **%s %s**!\n\n> %s **%s**\n> 🏟️ From: *%s*",
+            player.DisplayName,rarity,rewardName,wh_rewardIcon(rewardName),rewardName,raidName),
+        color=rarityColors[rarity] or 9807270,timestamp=wh_timestamp(),
+        footer={text="AOTR FREE HUB • Webhook"},
+    }
+    wh_sendWebhook({username=WebhookConfig.botUsername,embeds={embed}})
+end
 
-        -- Rewards
-        local gold      = getGuiText("Interface.Rewards.Main.Info.Main.Items.Gold.Main.Inner.Quantity")
-        local xp        = getGuiText("Interface.Rewards.Main.Info.Main.Items.XP.Main.Inner.Quantity")
-        local gems      = getGuiText("Interface.Rewards.Main.Info.Main.Items.Gems.Main.Inner.Quantity")
-        local bp_xp     = getGuiText("Interface.Rewards.Main.Info.Main.Items.BP_XP.Main.Inner.Quantity")
-        local serum     = getGuiText("Interface.Rewards.Main.Info.Main.Items.Serum.Main.Inner.Quantity")
-        local common    = getGuiText("Interface.Rewards.Main.Info.Main.Items.Common_Perk.Main.Inner.Quantity")
-        local secret    = getGuiText("Interface.Rewards.Main.Info.Main.Items.Secret_Perk.Main.Inner.Quantity")
-        local epic      = getGuiText("Interface.Rewards.Main.Info.Main.Items.Epic_Perk.Main.Inner.Quantity")
-        local prestige  = getGuiText("Interface.Rewards.Main.Info.Main.Items.Prestige_Scroll.Main.Inner.Quantity")
-        local mythical  = getGuiText("Interface.Rewards.Main.Info.Main.Items.Mythical_Perk.Main.Inner.Quantity")
+local function wh_sendPrestige(player,prestigeLevel,boostChosen,memoryChosen)
+    local embed={
+        title="📜  Prestige Scroll Used!",
+        description=string.format("**%s** used a Prestige Scroll!\n\n> ✨ **Prestige:** %d\n> 📈 **Boost:** %s\n> 🧠 **Memory:** %s",
+            player.DisplayName,prestigeLevel or 0,boostChosen or "Unknown",memoryChosen or "Unknown"),
+        color=9699539,timestamp=wh_timestamp(),
+        footer={text="AOTR FREE HUB • Prestige"},
+    }
+    wh_sendWebhook({username=WebhookConfig.botUsername,embeds={embed}})
+end
 
-        local timeStr   = os.date("%d-%b-%Y %I:%M %p")
-        local username  = webhookUsername and LP.Name or "Hidden"
+-- Public AoTWebhook API (for use from other scripts)
+AoTWebhook = {}
+function AoTWebhook.onRaidStart(player,raidName,difficulty)
+    playerDataWH[player.UserId]={damageDealt=0,raidName=raidName or "Unknown Raid",difficulty=difficulty or "Aberrant",startTime=os.time(),rewards={},inRaid=true,damageTicker=0}
+    wh_sendRaidStart(player,raidName,difficulty)
+end
+function AoTWebhook.onDamageDealt(player,amount)
+    local data=playerDataWH[player.UserId] if not data then return end
+    data.damageDealt=data.damageDealt+(amount or 0)
+end
+function AoTWebhook.onRewardObtained(player,rewardName,amount,rarity)
+    local data=playerDataWH[player.UserId] if not data then return end
+    table.insert(data.rewards,{name=rewardName,amount=amount or 1})
+    if rarity=="Legendary" or rarity=="Mythical" then wh_sendRareDropAlert(player,rewardName,rarity,data.raidName) end
+end
+function AoTWebhook.onRaidEnd(player,result)
+    local data=playerDataWH[player.UserId] if not data then return end
+    data.inRaid=false wh_sendRaidEnd(player,data,result or "Victory") playerDataWH[player.UserId]=nil
+end
+function AoTWebhook.onPrestigeScroll(player,prestigeLevel,boostChosen,memoryChosen)
+    wh_sendPrestige(player,prestigeLevel,boostChosen,memoryChosen)
+end
 
-        -- ping @everyone on rare drops
-        local rareDrops = (tonumber(serum) or 0) + (tonumber(mythical) or 0)
-        local pingStr   = rareDrops > 0 and "@everyone 🎉 Rare drop!" or nil
-
-        -- build embed colour: green normally, gold on rare
-        local embedColor = rareDrops > 0 and 16766720 or 3066993
-
-        local embed = {
-            title       = "⚔️  Vector Hub — AOT:R Rewards",
-            color       = embedColor,
-            thumbnail   = { url = THUMB },
-            fields      = {
-                {
-                    name   = "👤  Player",
-                    value  = username,
-                    inline = false,
-                },
-                {
-                    name   = "📊  Stats",
-                    value  = string.format(
-                        "⏱ Time: **%s**\n💥 Damage: **%s**\n💀 Kills: **%s**\n🎯 Crits: **%s**",
-                        timeTaken, damage, kills, crits
-                    ),
-                    inline = true,
-                },
-                {
-                    name   = "💰  Rewards",
-                    value  = string.format(
-                        "🪙 Gold: **%s**\n✨ XP: **%s**\n💎 Gems: **%s**\n📘 BP XP: **%s**",
-                        gold, xp, gems, bp_xp
-                    ),
-                    inline = true,
-                },
-                {
-                    name   = "📦  Drops",
-                    value  = string.format(
-                        "🟢 Common: **%s**\n🔵 Secret: **%s**\n🟣 Epic: **%s**\n🌟 Mythical: **%s**\n📜 Prestige: **%s**\n🧪 Serum: **%s**",
-                        common, secret, epic, mythical, prestige, serum
-                    ),
-                    inline = false,
-                },
-            },
-            footer = { text = "Sent at " .. timeStr .. "  •  Vector Hub" },
-        }
-
-        sendWebhookEmbed({
-            content = pingStr,
-            embeds  = { embed },
-        })
-
-        -- notify in-game too
-        Fluent:Notify({
-            Title   = "Webhook",
-            Content = "Rewards sent to Discord!",
-            Duration = 3,
-        })
+-- Auto damage ticker
+RunService.Heartbeat:Connect(function(dt)
+    if not WebhookConfig.enabled then return end
+    for userId,data in pairs(playerDataWH) do
+        if data.inRaid then
+            data.damageTicker=data.damageTicker+dt
+            if data.damageTicker>=WebhookConfig.damageInterval then
+                data.damageTicker=0
+                local player=Players:GetPlayerByUserId(userId)
+                if player then wh_sendDamageUpdate(player,data) end
+            end
+        end
     end
 end)
 
--- ── UI ───────────────────────────────────────────────────────
-Tabs.Webhook:AddSection("Discord Webhook")
+Players.PlayerRemoving:Connect(function(player) playerDataWH[player.UserId]=nil end)
 
-Tabs.Webhook:AddParagraph({
-    Title   = "How to use",
-    Content = "1. Create a Discord webhook in your server's channel settings.\n2. Paste the URL below.\n3. Enable 'Send to Webhook'.\nThe embed is sent automatically every time the reward screen appears.",
+-- ─── Webhook UI ────────────────────────────────────────────
+Tabs.Webhook:AddSection("Webhook Configuration")
+
+Tabs.Webhook:AddInput("WebhookURL",{
+    Title="Discord Webhook URL",
+    Placeholder="https://discord.com/api/webhooks/...",
+    Callback=function(v) WebhookConfig.url=v end
 })
 
-Tabs.Webhook:AddInput("WebhookURL", {
-    Title       = "Webhook URL",
-    Description = "Paste your Discord webhook URL here",
-    Placeholder = "https://discord.com/api/webhooks/...",
-    Finished    = false,
-    Callback    = function(v)
-        webhookURL = v
-    end,
+Tabs.Webhook:AddInput("WebhookBotName",{
+    Title="Bot Username",
+    Placeholder="AOTR FREE HUB Tracker",
+    Callback=function(v) WebhookConfig.botUsername=(v~="" and v or "AOTR FREE HUB Tracker") end
 })
 
-Tabs.Webhook:AddToggle("WebhookEnabled", {
-    Title       = "Send to Webhook",
-    Description = "Automatically sends reward data to your Discord channel",
-    Default     = false,
-    Callback    = function(v)
-        webhookEnabled = v
-        lastMissionTime = nil   -- reset so it fires even if rewards screen is already open
-        if v and webhookURL == "" then
-            Fluent:Notify({ Title="Webhook", Content="Please paste your webhook URL first.", Duration=4 })
-            webhookEnabled = false
-        end
-    end,
+Tabs.Webhook:AddSlider("WebhookDmgInterval",{
+    Title="Damage Update Interval (seconds)",
+    Min=10,Max=120,Default=30,Rounding=0,
+    Callback=function(v) WebhookConfig.damageInterval=v end
 })
 
-Tabs.Webhook:AddToggle("WebhookShowUser", {
-    Title       = "Show Roblox Username",
-    Description = "Include your username in the embed",
-    Default     = true,
-    Callback    = function(v) webhookUsername = v end,
+Tabs.Webhook:AddToggle("WebhookEnabled",{
+    Title="Enable Webhook",
+    Description="Activates Discord webhook logging",
+    Default=false,
+    Callback=function(v) WebhookConfig.enabled=v end
 })
 
-Tabs.Webhook:AddSection("Test & Utilities")
+Tabs.Webhook:AddSection("Test & Manual Triggers")
 
 Tabs.Webhook:AddButton({
-    Title       = "Send Test Embed",
-    Description = "Sends a test message to verify your webhook is working",
-    Callback    = function()
-        if webhookURL == "" then
-            Fluent:Notify({ Title="Webhook", Content="Paste your webhook URL first!", Duration=4 })
+    Title="Test Webhook",
+    Description="Sends a test embed to your webhook URL",
+    Callback=function()
+        if WebhookConfig.url=="" then
+            Fluent:Notify({Title="AOTR FREE HUB",Content="Please enter a Webhook URL first!",Duration=3})
             return
         end
-        sendWebhookEmbed({
-            embeds = {{
-                title       = "✅  Vector Hub — Webhook Test",
-                description = "Your webhook is connected and working!\nRewards will be sent here automatically.",
-                color       = 3066993,
-                thumbnail   = { url = THUMB },
-                footer      = { text = "Sent by " .. LP.Name .. "  •  Vector Hub" },
-            }},
-        })
-        Fluent:Notify({ Title="Webhook", Content="Test embed sent!", Duration=3 })
-    end,
+        pcall(function()
+            HttpService:PostAsync(WebhookConfig.url,HttpService:JSONEncode({
+                username=WebhookConfig.botUsername,
+                embeds={{
+                    title="✅  Webhook Connected!",
+                    description="**AOTR FREE HUB** webhook is working correctly.\n> Ready to log raids, rewards, and damage.",
+                    color=3066993,
+                    timestamp=wh_timestamp(),
+                    footer={text="AOTR FREE HUB • Test"},
+                }}
+            }),Enum.HttpContentType.ApplicationJson,false)
+            Fluent:Notify({Title="AOTR FREE HUB",Content="Test webhook sent!",Duration=3})
+        end)
+    end
 })
 
 Tabs.Webhook:AddButton({
-    Title       = "Clear URL",
-    Description = "Removes the saved webhook URL",
-    Callback    = function()
-        webhookURL     = ""
-        webhookEnabled = false
-        Fluent:Notify({ Title="Webhook", Content="Webhook URL cleared.", Duration=3 })
-    end,
+    Title="Send Damage Update Now",
+    Description="Manually sends your current damage stats",
+    Callback=function()
+        local data=playerDataWH[LP.UserId]
+        if data and data.inRaid then
+            wh_sendDamageUpdate(LP,data)
+            Fluent:Notify({Title="AOTR FREE HUB",Content="Damage update sent!",Duration=3})
+        else
+            Fluent:Notify({Title="AOTR FREE HUB",Content="Not currently in a tracked raid.",Duration=3})
+        end
+    end
+})
+
+Tabs.Webhook:AddSection("Raid Tracker")
+
+Tabs.Webhook:AddDropdown("WebhookRaidName",{
+    Title="Raid Name",
+    Values={"Attack Titan Raid","Armored Titan Raid","Female Titan Raid","Colossal Titan Raid","Onikiri Raid"},
+    Default="Colossal Titan Raid",
+    Callback=function(v) _G.WH_RaidName=v end
+})
+
+Tabs.Webhook:AddDropdown("WebhookDifficulty",{
+    Title="Difficulty",
+    Values={"Hard","Severe","Aberrant"},
+    Default="Aberrant",
+    Callback=function(v) _G.WH_Difficulty=v end
+})
+
+Tabs.Webhook:AddButton({
+    Title="Simulate Raid Start",
+    Description="Manually fires a Raid Start embed",
+    Callback=function()
+        AoTWebhook.onRaidStart(LP,_G.WH_RaidName or "Colossal Titan Raid",_G.WH_Difficulty or "Aberrant")
+        Fluent:Notify({Title="AOTR FREE HUB",Content="Raid start webhook sent!",Duration=3})
+    end
+})
+
+Tabs.Webhook:AddButton({
+    Title="Simulate Raid Victory",
+    Description="Manually fires a Raid End (Victory) embed",
+    Callback=function()
+        AoTWebhook.onRaidEnd(LP,"Victory")
+        Fluent:Notify({Title="AOTR FREE HUB",Content="Raid victory webhook sent!",Duration=3})
+    end
 })
 
 -- ============================================================
@@ -1621,7 +1674,7 @@ LP.CharacterAdded:Connect(function(char) SafeInitCharacter(char) end)
 
 -- Notify loaded
 Fluent:Notify({
-    Title   = "Vector Hub",
+    Title   = "AOTR FREE HUB",
     Content = "Loaded successfully! Press F1 to toggle UI.",
     Duration= 4,
 })
